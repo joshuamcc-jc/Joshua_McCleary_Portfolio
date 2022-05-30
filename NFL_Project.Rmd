@@ -1,0 +1,406 @@
+---
+title: "IST 707 Final Project - Predicting NFL Playoff Eligibility"
+author: "Tesslyn Knapp, Joshua McCleary, Bobby Schaible"
+date: "12/11/2020"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Introduction**
+
+The National Football League or, the NFL for short,  wasn’t always the exciting and lucrative sports league we know and love today. Formed in 1918 the league came about right after football’s most vulnerable time. No real protection and vicious hits in the early 20th century had led to a number of player deaths, particularly at the collegiate level. The carnage was so troublesome that president, Theodore Roosevelt, a staunch fan of the game, acknowledged that the sport needed reform if it were to continue. The saving grace for the sport was the introduction of the forward pass. 
+
+ 
+Forward passing revolutionized the safety and excitement of a quickly dying sport and presented an opportunity for wealthy businessmen to capitalize. Using the quickly growing pool of collegiate players, the burgeoning league began to build it’s player and fanbases. Weathering a world war, multiple franchise changes, and a league merger the game of American Football ingrained itself into the American psyche. With such a vested interest in the sport many have looked for more innovative ways to study and improve it. From this initiative, sports analytics was born. 
+
+
+Sports analytics provides a wide range of knowledge regarding specific teams and the sport under analysis. For the NFL this data is used for recovery timetables, drafting new talent, evaluating current talent, and making effective game plans. All of these uses translate to hundreds of millions of dollars for both the players and franchises because their profit margins are linked to how well the games are played and how often the superstars appear in them. This is especially true now that fantasy football has gained enormous popularity within the NFL fandom. Fantasy football has had the unintended consequence of shifting the focus away from teams and their playoff chances to individual players and how their production influences the fantasy owner’s playoff hopes. When prize money is added to the mix these statistics and analysis created by the individual or sourced from apps like ESPN or the Dominator app become invaluable.  
+
+ 
+
+# **Analysis and Models**
+
+### About the Data
+
+#### Importing Data
+
+This dataset is comprised of NFL data from the 'nfl_data.csv' in order to support analysis. It has 669 observations of 63 variables. There are 32 teams featured in the dataset playing 16 games per season spanning from years 1998-2019. Data cleaning was needed to be done on this dataset for various reasons, which will be shown later.
+
+
+```{r message=FALSE}
+# Install necessary packages
+library(viridis)
+library(ggplot2)
+library(arules)
+library(e1071)
+library(caret)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(class)
+library(randomForest)
+library(FactoMineR)
+library(ggcorrplot)
+library(arulesViz)
+library(grid)
+library(gridExtra)
+library(RCurl)
+
+# Importing data from GitHub
+nfl_url <- getURL('https://raw.githubusercontent.com/ttknapp/ist707finalproject/main/nfl_data.csv')
+nfl <- read.csv(text=nfl_url, header = TRUE, stringsAsFactors = FALSE)
+```
+
+
+#### Preliminary Data Cleaning
+In order to ease analysis, the team_code column was separated into 'team' and 'year' columns and the dataset was reordered.
+```{r}
+# Check data types
+#str(nfl)
+
+# Data Cleaning
+nfl$year <- substring(nfl$team_code, 4) # grabs everything from team_code starting at 4th character
+nfl$team <- substring(nfl$team_code, 1, 3) # grabs first three characters from team_code
+nfl <- nfl[,c(1, 64, 65, 2:63)] # moves newly created columns to front of dataset
+head(nfl)
+```
+
+
+#### Exploratory Data Analysis
+
+##### Histograms of Total NFL Yards, Points, and Wins
+In order to get a better understanding of the data, histograms were created for total NFL yards, points, and wins.
+
+```{r}
+# Histograms of Total NFL Yards, Points, and Wins
+# Total yards histogram
+ggplot(nfl, aes(x = yards)) + theme_light() + geom_histogram(binwidth = 100, color = "white", fill = "#0b3954") +
+  ggtitle("Total Yards")
+# Total points scored histogram
+ggplot(nfl, aes(x = PF)) + theme_light() + geom_histogram(binwidth = 20, color = "white", fill = "#0b3954") +
+  ggtitle("Total Points")
+# Total wins histogram
+ggplot(nfl, aes(x = wins)) + theme_light() + geom_histogram(binwidth =1, color = "white", fill = "#0b3954") +
+  ggtitle("Total Wins")
+
+tapply(nfl$yards, list(nfl$year), mean)
+```
+
+It seems that most teams gain about 4500-6000 yards per season (and therefore between 280-375 yards per game). The maximum number of yards gained in one season is 7474 yards by the New Orleans Saints in 2011. 
+
+Most teams score between 250-400 points per season (and therefore averaging about 12-15 points per game). The maximum amount of points scored in one season is 606 by the Denver Broncos in 2013. 
+
+Most teams average about 7 or fewer wins per season with a maximum of 16 wins. 
+
+
+##### Comparing Yards, Wins, Passes For, and Turnovers for the Season
+Additionally it was interesting to analyze yards, wins, passes for, and turnovers. 
+```{r}
+# Plot comparing Yards, Wins, Passes For, and Turnovers for the season
+ggplot(nfl, aes(x = yards, y = wins, color = PF)) + geom_point(aes(size = TO)) + 
+  theme_light() + ggtitle("Wins vs. Yards Gained vs. Points Scored")
+```
+
+Teams with more yards gained and more points scored usually win more games. Turnovers are more variable, but generally fewer turnovers trend with more points-for and wins. Also, teams with greater than 20 turnovers and scoring less than 400 points in a season typically have fewer than 10 wins.
+
+
+#### Data Cleaning
+In order to predict playoff eligibility, a new column was needed to be created containing all of the teams that made the playoffs between 1998-2019.
+```{r}
+# Create new data frame containing all playoff teams since 1999
+playoffs <- c("sfo2019", "gnb2019", "nor2019", "phi2019", "sea2019", "min2019"
+              , "rav2019", "kan2019", "nwe2019", "htx2019", "buf2019", "oti2019"
+              , "nor2018", "ram2018", "chi2018", "dal2018", "sea2018", "phi2018"
+              , "kan2018", "nwe2018", "htx2018", "rav2018", "sdg2018", "clt2018"
+              , "phi2017", "min2017", "ram2017", "nor2017", "car2017", "atl2017"
+              , "nwe2017", "pit2017", "jax2017", "kan2017", "oti2017", "buf2017"
+              , "dal2016", "atl2016", "sea2016", "gnb2016", "nyg2016", "det2016"
+              , "nwe2016", "kan2016", "pit2016", "htx2016", "rai2016", "mia2016"
+              , "car2015", "crd2015", "min2015", "was2015", "gnb2015", "sea2015"
+              , "den2015", "nwe2015", "cin2015", "htx2015", "kan2015", "pit2015"
+              , "sea2014", "gnb2014", "dal2014", "car2014", "crd2014", "det2014"
+              , "nwe2014", "den2014", "pit2014", "clt2014", "cin2014", "rav2014"
+              , "sea2013", "car2013", "phi2013", "gnb2013", "sfo2013", "nor2013"
+              , "den2013", "nwe2013", "cin2013", "clt2013", "kan2013", "sdf2013"
+              , "atl2012", "sfo2012", "gnb2012", "was2012", "sea2012", "min2012"
+              , "den2012", "nwe2012", "htx2012", "rav2012", "clt2012", "cin2012"
+              , "gnb2011", "sfo2011", "nor2011", "nyg2011", "atl2011", "det2011"
+              , "nwe2011", "rav2011", "htx2011", "den2011", "pit2011", "cin2011"
+              , "atl2010", "chi2010", "phi2010", "sea2010", "nor2010", "gnb2010"
+              , "nwe2010", "pit2010", "clt2010", "kan2010", "rav2010", "nyj2010"
+              , "nor2009", "min2009", "dal2009", "crd2009", "gnb2009", "phi2009"
+              , "clt2009", "sdg2009", "nwe2009", "cin2009", "nyj2009", "rav2009"
+              , "nyg2008", "car2008", "min2008", "crd2008", "atl2008", "phi2008"
+              , "oti2008", "pit2008", "mia2008", "sdg2008", "clt2008", "rav2008"
+              , "dal2007", "gnb2007", "sfo2007", "tam2007", "nyg2007", "was2007"
+              , "nwe2007", "clt2007", "sdg2007", "pit2007", "jax2007", "oti2007"
+              , "chi2006", "nor2006", "phi2006", "sea2006", "dal2006", "nyg2006"
+              , "sdg2006", "rav2006", "clt2006", "nwe2006", "nyj2006", "kan2006"
+              , "sea2005", "chi2005", "tam2005", "nyg2005", "car2005", "was2005"
+              , "clt2005", "den2005", "cin2005", "nwe2005", "jax2005", "pit2005"
+              , "phi2004", "atl2004", "gnb2004", "sea2004", "ram2004", "min2004"
+              , "pit2004", "nwe2004", "clt2004", "sdg2004", "nyj2004", "den2004"
+              , "phi2003", "ram2003", "car2003", "gnb2003", "sea2003", "dal2003"
+              , "nwe2003", "kan2003", "clt2003", "rav2003", "oti2003", "den2003"
+              , "phi2002", "tam2002", "gnb2002", "sfo2002", "nyg2002", "atl2002"
+              , "rai2002", "oti2002", "pit2002", "nyj2002", "clt2002", "cle2002"
+              , "ram2001", "chi2001", "phi2001", "gnb2001", "sfo2001", "tam2001"
+              , "pit2001", "nwe2001", "rai2001", "mia2001", "rav2001", "nyj2001"
+              , "nyg2000", "min2000", "nor2000", "phi2000", "tam2000", "ram2000"
+              , "oti2000", "rai2000", "mia2000", "rav2000", "den2000", "clt2000"
+              , "ram1999", "tam1999", "was1999", "min1999", "dal1999", "det1999"
+              , "jax1999", "clt1999", "sea1999", "oti1999", "buf1999", "mia1999")
+
+# Add playoff teams as a new column in the NFL dataset
+nfl$playoffs <- nfl$team_code %in% playoffs  
+nfl$playoffs <- ifelse(nfl$playoffs == "TRUE", 1, 0)
+tapply(nfl$playoffs, list(nfl$year), sum) #check to see if all 12 playoff teams were coded properly
+nfl$playoffs <- as.factor(nfl$playoffs) #change playoffs column to factor data type
+#str(nfl)
+data.frame(colnames(nfl))
+newNFL <- nfl[,-c(1:3,31:32,61:62)] #Remove non-numerical features
+#str(newNFL)
+```
+
+Teams that made the playoffs were given a value of 1 and teams that did not make the playoffs were given a value of 0.
+
+
+
+### Model Pre-Processing
+In order to reduce the likelihood of overfitting the model and skewing the data, analysis was done on the correlation of variables to decide which variables, if any, to remove for future playoff prediction models.
+
+```{r}
+# Find most correlated variables in order to remove for further analysis
+set.seed(4321)
+correlationMatrix <- cor(newNFL[,-59])
+ggcorrplot(correlationMatrix, outline.color = "white", colors = c("#0b3954", "white", "#C81D25")) + ggtitle("Correlation Matrix", subtitle = "Pre Feature Selection")
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.75) #Identify highly correlated features
+colnames(newNFL[,highlyCorrelated]) #View highly correlated features
+cleanNFL<- newNFL[,-highlyCorrelated] #Remove highly correlated features
+colnames(cleanNFL)
+cleanNFL <- cleanNFL[,-1] #Remove wins as a feature
+updatedCorMatrix <- cor(cleanNFL[,-24])
+ggcorrplot(updatedCorMatrix, outline.color = "white", colors = c("#0b3954", "white", "#C81D25")) + ggtitle("Correlation Matrix", subtitle = "Post Feature Selection") 
+```
+
+The most highly correlated features were removed from the data frame. Wins did not appear among the most highly correlated features, but they were still removed because losses appeared under the most highly correlated features.
+
+The data was reduced from 66 variables to 24 variables.
+
+Next, the variables were ranked individually by importance in playoff eligibility.
+```{R}
+# Visualize variable importance
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+model <- train(playoffs~., data = cleanNFL, method = "lvq", preProcess = "scale", trControl = control)
+importance <- varImp(model, scale = FALSE)
+plot(importance, main = "Feature Selection: Variable Importance")
+```
+
+
+
+#### Data Discretization
+The data needed to be discretized for playoff prediction modeling. The important variables for playoff appearance were discretized into 4 bins by frequency.
+
+```{r}
+# Discretize NFL data
+discreteNFL <- discretizeDF(cleanNFL, default = list(method = "frequency", breaks = 4))
+head(discreteNFL)
+#str(discreteNFL)
+```
+
+Next, a sample of 80% of the data was created in order to assign as training data. The remaining 20% of the data was assigned as testing data.
+```{r}
+# Derive sample of total data and separate into testing and training data
+set.seed(4321)
+split <- sample(nrow(discreteNFL), nrow(discreteNFL)*.80, replace = FALSE)
+nflTrain <- discreteNFL[split,]
+nflTest <- discreteNFL[-split,]
+nrow(nflTrain)
+nrow(nflTest)
+```
+There are 535 teams in the training data and 134 teams in the testing data.
+
+
+Finally, two different data frames were created to include playoff results and exclude playoff results to test model accuracy.
+```{r}
+# Create 2 data frames with one including playoff results and one excluding playoff results
+nflTestPlayoff <- nflTest$playoffs # Keeps just the result column
+nflTestNoPlayoff <- nflTest[,-66] # Removes result column
+```
+
+
+# **Results**
+
+#### Naive Bayes Model
+Naive Bayes is a technique that assigns class labels to vectors of feature values. The Naive Bayes classifiers assume that the value of a particular feature is independent of the value of any other feature, given the class variable. There are some drawbacks, as Naive Bayes can rely on oversimplified assumptions, which can affect the accuracy of the model.
+
+```{r}
+# Naive Bayes Model
+set.seed(4321)
+nflNB <- naiveBayes(playoffs~., data = nflTrain, na.action = na.pass)
+predNB <- predict(nflNB, nflTestNoPlayoff)
+predNB2 <- as.data.frame(predNB)
+ggplot(data = predNB2, aes(x = predNB)) + geom_bar(fill = "#0B3954") + theme_light() + 
+  ggtitle("Naive Bayes Density Plot", subtitle = "Prediction Model")
+```
+
+##### Naive Bayes Confusion Matrix
+```{r}
+# Naive Bayes Confusion Matrix
+nbCM <- confusionMatrix(predNB, nflTestPlayoff)
+nbCM_table <- as.data.frame(nbCM$table)
+nbCM_stats <- data.frame(nbCM$overall)
+nbCM_stats$nbCM.overall <- round(nbCM_stats$nbCM.overall, 2)
+nbCM_d_p <- ggplot(data = nbCM_table, aes(x=(Reference), y=(Prediction), fill = Freq)) + geom_tile() +
+  geom_text(aes(label = paste("",Freq)), color = 'black', size = 8) +
+  theme_light() +
+  guides(fill=FALSE) + scale_fill_gradient2(low="#0B3954", mid = "white", high = "#c81d25", midpoint = 35)
+nbCM_stats_p <- tableGrob(nbCM_stats)
+grid.arrange(nbCM_d_p, nbCM_stats_p,nrow = 1, ncol = 2, 
+             top=textGrob("Naive Bayes Confusion Matrix and Statistics",gp=gpar(fontsize=25,font=1)))
+```
+The Naive Bayes model achieved an accuracy of 85.07% in correctly predicting NFL playoff eligibility.
+
+
+
+#### Decision Tree Model
+A Decision Tree is a flowchart-like structure in which each internal node represents a “test” on an attribute, each branch represents the outcome of the test, and each leaf node represents a class label. The paths from root to leaf represent classification rules. Decision Trees tend to have issues with overfitting, but can still be helpful for analyses.
+
+```{r}
+# Decision Tree Model
+set.seed(4321)
+nflDT <- rpart(playoffs~., data = nflTrain, method = "class")
+fancyRpartPlot(nflDT)
+```
+Interceptions were the biggest indicator of a team’s playoff chances.
+
+Of the teams with fewer than 12 interceptions on the year 80% made the playoff if they threw more than 22 passing touchdowns.
+
+Of the teams that missed the playoffs, 46% threw between 6 and 27 passing touchdowns and allowed between 5.7 and 7.9 yards per pass attempt on defense in addition throwing between 12 and 39 interceptions.
+
+
+
+#### Random Forest Model
+Random Forests are an ensemble learning method for classification, regression, and other tasks by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes of the individual trees. Random Forests are advantageous to regular Decision Trees because they correct for the overfitting errors commonly found in Decision Tree models. Therefore, they often outperform Decision Trees.
+
+```{r}
+# Random Forest
+set.seed(4321)
+nflRF <- randomForest(playoffs~., data = nflTrain)
+predRF <- predict(nflRF, nflTestNoPlayoff)
+```
+
+#### Random Forest Model Confusion Matrix
+```{r}
+# Random Forest Confusion Matrix
+rfCM <- confusionMatrix(predRF, nflTestPlayoff)
+rfCM_table <- as.data.frame(rfCM$table)
+rfCM_stats <- data.frame(rfCM$overall)
+rfCM_stats$rfCM.overall <- round(rfCM_stats$rfCM.overall, 2)
+rfCM_d_p <- ggplot(data = rfCM_table, aes(x=(Reference), y=(Prediction), fill = Freq)) + 
+  geom_tile() +geom_text(aes(label = paste("",Freq)), color = 'black', size = 8) +
+  theme_light() + guides(fill=FALSE) + scale_fill_gradient2(low="#0B3954", mid = "white", high = "#c81d25", midpoint = 35)
+rfCM_stats_p <- tableGrob(rfCM_stats)
+grid.arrange(rfCM_d_p, rfCM_stats_p,nrow = 1, ncol = 2, 
+             top=textGrob("Random Forest Confusion Matrix and Statistics",gp=gpar(fontsize=25,font=1)))
+```
+
+This initial Random Forest Model achieved an accuracy of 77.62% in correctly predicting NFL playoff eligibility.
+
+
+#### Tuned Random Forest Model
+Next, the Random Forest Model was tuned in order to try to increase the model's accuracy. It was tuned by setting a number of trees at 500 and the number of variables available for splitting at each tree node (mtry) to 6.
+
+```{r}
+# Tune RF Model
+set.seed(4321)
+nflRF2 <- randomForest(playoffs~., data = nflTrain, ntree = 500, mtry = 6)
+predRF2 <- predict(nflRF2, nflTestNoPlayoff)
+rfCM2 <- confusionMatrix(predRF2, nflTestPlayoff)
+```
+
+#### Tuned Random Forest Model Confusion Matrix
+```{r}
+# Tuned RF Confusion Matrix
+rfCM2 <- confusionMatrix(predRF2, nflTestPlayoff)
+rfCM2_table <- as.data.frame(rfCM2$table)
+rfCM2_stats <- data.frame(rfCM2$overall)
+rfCM2_stats$rfCM2.overall <- round(rfCM2_stats$rfCM2.overall, 2)
+rfCM2_d_p <- ggplot(data = rfCM2_table, aes(x=(Reference), y=(Prediction), fill = Freq)) + 
+  geom_tile() +geom_text(aes(label = paste("",Freq)), color = 'black', size = 8) +
+  theme_light() + guides(fill=FALSE) + scale_fill_gradient2(low="#0B3954", mid = "white", high = "#c81d25", midpoint = 35)
+rfCM2_stats_p <- tableGrob(rfCM2_stats)
+grid.arrange(rfCM2_d_p, rfCM2_stats_p,nrow = 1, ncol = 2, 
+             top=textGrob("Random Forest (tuned) Confusion Matrix and Statistics",gp=gpar(fontsize=25,font=1)))
+```
+The tuned Random Forest Model achieved an accuracy of 80.60% in correctly predicting NFL playoff eligibility.
+
+
+#### Association Rule Mining
+##### Apriori Algorithm
+Since the data was cleaned and all of the data types were transformed into factors, the Apriori algorithm could be used in order to generate association rules. These rules are created based off of parameters of support, confidence, and lift and are a good tool to observe associations between variables.
+
+Support: gives an idea of how frequent an item-set is in all the transactions
+
+Confidence: an indication of how often the rule is found to be true
+
+Lift: the ratio of the observed support to the expected
+
+
+##### General Rules
+The target remained to obtain strong general rules, so a combination of Support = 0.14 Confidence = 0.6, and lift >= 1 was used to generate those rules. The 10 rules with the strongest confidence of this selection are listed below.
+
+```{r}
+# Run Association Rule Mining
+# Run Apriori algorithm to generate rules with strong support and confidence. Then, sort by lift and return top 10 rules in order of confidence.
+# General Rules
+nfl_rules <- apriori(discreteNFL, parameter = list(support = 0.14, confidence = 0.6))
+nflrules_sorted <- sort(nfl_rules, by="lift")
+inspect(head(sort(nflrules_sorted, by = "confidence"), 10))
+```
+
+Teams that only totaled 2-9 rushing touchdowns per season are more likely to miss the playoffs. (support = 0.17, confidence = 0.89)
+
+Additionally, teams that let opposing teams total both 16-31 rushing touchdowns and 108-161 rushing first downs are also likely to miss the playoffs. (support = 0.14, confidence = 0.88)
+
+It seems to be that the team’s rushing defense is the most important variable in missing the playoffs (letting the other team dictate game pace) whereas passing seems to be a slightly less-influential variable in missing the playoffs.
+
+
+
+##### Playoff Prediction Rules
+Next, target shifted to obtain strong playoff eligibility rules, so a combination of Support = 0.08 Confidence = 0.7, and lift >= 1 was used to generate those rules. The 10 rules with the strongest confidence of this selection are listed below.
+
+```{r}
+# Playoff Prediction Rules
+nfl_rules <- apriori(data=discreteNFL, parameter=list(supp=0.08,conf = 0.7), appearance = list (default="lhs",rhs="playoffs=1"), control = list (verbose=F))
+nflrules_sorted <- sort(nfl_rules, by="lift")
+inspect(head(sort(nflrules_sorted, by = "confidence"), 10))
+```
+
+```{r}
+# ARM Visualization
+plot(nflrules_sorted, method="graph",shading="confidence")
+```
+
+Teams that achieve between 27-55 passing touchdowns and only 2-12 interceptions throughout the season are most likely to make the playoffs. (support = 0.08, confidence = 0.87)
+
+Additionally, teams that only allow opposing teams to gain between 4.3-5.7 net yards per passing attempt and 53-84 rushing first downs throughout the season are likely to make the playoffs. (support = 0.09, confidence = 0.83)
+
+
+
+# **Conclusions**
+When studying the sport of American football it is imperative to remember that it is a team game and at the end of the season the goal is to hold up the Lombardi trophy. In pursuit of that ultimate goal a franchise must know the biggest pitfalls and how to avoid them given their personnel types. For many franchises, there are many years where they are on the cusp of a wildcard appearance but they couldn’t get the crucial wins they needed to break through. There are a number of possible explanations for this; injuries to star players, poor play calling, poor player performance, and lack of talent in general. When consulting with these teams, the goal is to optimize their performance on the player side by comparing their statistics to our findings of what makes a team successful. 
+
+ 
+Based on our analysis the biggest key to success lies in the passing game. Of the different statistics that were considered, passing touchdowns , yards per pass attempt, and interceptions had the most influence on their playoff appearances. This has become even more apparent as the past five super bowl winners had quarterbacks with exceptionally high touchdown-to-interception ratios and at least 8 yards per pass attempt. For many of the teams on the edge, the missing key is either a franchise quarterback, better protection or a better wide receiver. It could also mean prioritizing better defensive backs to give their current offense a better chance to keep up as the next most important statistic is pass yards per attempt by an opponent. 
+ 
+
+When addressing personnel issues like those previously mentioned it’s important to consider where a particular team falls in terms of draft order, as well as their cap space going into future seasons. In the future combining our current data with cap management patterns and draft records will allow for more in depth analysis and more precise recommendations for each team’s situation. Ultimately time is of the essence as money and the prime years of their current stars are at stake with each passing season.  
