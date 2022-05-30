@@ -1,3 +1,3 @@
 # Joshua_McCleary_Portfolio
 Showcasing projects from my Masters in Applied Data Science program at Syracuse University.
-This scripting project was a preliminary analysis of tweets regarding the two major political parties to see if there were parallels to polling results. Tweet sentiment analysis is the next phase of this project. Data analysis was done in Python.
+This project is an analysis of historical video game sales across different continents and game consoles in order to make a recommendation on what kinds of games to sell in the future based on the market. Analysis is done in R.
